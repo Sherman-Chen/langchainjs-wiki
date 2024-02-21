@@ -60,12 +60,16 @@ async _call(inputs, runManager) {
             const { returnValues } = finishStep;
             ...
             let response;
+            // 在返回时，是否把中间步骤也返回。
+            // 这个一般推荐返回，可以记录到日志中，方便调试
             if (this.returnIntermediateSteps) {
                 response = { ...returnValues, intermediateSteps: steps, ...additional };
             }
             else {
                 response = { ...returnValues, ...additional };
             }
+            // 如果还配置了返回input，则将input也返回
+            // 通常作为调试用
             if (!this.returnOnlyOutputs) {
                 response = { ...inputs, ...response };
             }
@@ -125,6 +129,42 @@ async _call(inputs, runManager) {
     }
 ```
 
+### runnable直接当agent
+从上面看到，agent主要是调用了plan方法。因此agent还可以直接就是一个runable，只要我们将invoke封装成plan即可。
+
+```typescript
+// 在agent的构造函数中，有这个一个判断
+if (Runnable.isRunnable(input.agent)) {
+      agent = new RunnableAgent({ runnable: input.agent })
+}
+
+// RunnableAgent的定义
+export declare class RunnableAgent extends BaseMultiActionAgent {
+    protected lc_runnable: boolean;
+    lc_namespace: string[];
+    runnable: Runnable<ChainValues & {
+        steps: AgentStep[];
+    }, AgentAction[] | AgentAction | AgentFinish>;
+    stop?: string[];
+    get inputKeys(): string[];
+    constructor(fields: RunnableAgentInput);
+    plan(steps: AgentStep[], inputs: ChainValues, callbackManager?: CallbackManager): Promise<AgentAction[] | AgentFinish>;
+}
+
+// plan的实现
+async plan(steps, inputs, callbackManager) {
+        const invokeInput = { ...inputs, steps };
+        const output = await this.runnable.invoke(invokeInput, {
+            callbacks: callbackManager,
+            runName: "RunnableAgent",
+        });
+        if (isAgentAction(output)) {
+            return [output];
+        }
+        return output;
+    }
+```
+
 ### shouldContinue
 
 在上面的代码中，可以看到每次循环都调用这个是否继续。这个实际上是用来判断有没有超过最大的迭代次数的。
@@ -143,3 +183,9 @@ private shouldContinue(iterations: number): boolean {
 在实际上使用的过程中，这个我们一般会设置一个值。对于简单任务，这个可以设置小一点，比如3。对于复杂的任务，则需要设置大一些。
 
 最好都设置一下，因为有可能模型返回的结果一直有问题，这个会导致模型陷入死循环中，这样会浪费非常大的token。
+
+# 总结
+
+了解了agentExecutor的执行，实际上整个agent的执行逻辑就已经清晰了。
+
+无非就是循环调用模型，然后通过模型返回的结果，判断是调用tool还是直接返回给用户。
