@@ -165,6 +165,55 @@ let msg = [
 
 langchains封装ChatMessagePromptTemplate用于承载这种类型。
 
+## partialVariables
+
+预设变量。比如我们的promptTemplate比较复杂，分成很多步骤组成。
+
+```typescript
+const prompt = new PromptTemplate({
+  template: "{foo}{bar}",
+  inputVariables: ["bar"],
+  partialVariables: {
+    foo: "foo",
+  },
+});
+```
+
+这里创建的时候或者在中间步骤我们就得知了foo变量的值，那么我们就能够使用partialVariables提前设置这个值。
+
+在最终生成的时候，会将这个partialVariables与用户的变量进行合并，然后生成最终的prompt。
+
+```typescript
+  /**
+   * Merges partial variables and user variables.
+   * @param userVariables The user variables to merge with the partial variables.
+   * @returns A Promise that resolves to an object containing the merged variables.
+   */
+  async mergePartialAndUserVariables(
+    userVariables: TypedPromptInputValues<RunInput>
+  ): Promise<
+    InputValues<Extract<keyof RunInput, string> | PartialVariableName>
+  > {
+    // 获取预设变量
+    const partialVariables = this.partialVariables ?? {};
+    const partialValues: Record<string, string> = {};
+    // 变量预设变量。如果是prompse则使用await获取其值
+    for (const [key, value] of Object.entries(partialVariables)) {
+      if (typeof value === "string") {
+        partialValues[key] = value;
+      } else {
+        partialValues[key] = await (value as () => Promise<string>)();
+      }
+    }
+    // 合并两个变量
+    const allKwargs = {
+      ...(partialValues as Record<PartialVariableName, string>),
+      ...userVariables,
+    };
+    return allKwargs;
+  }
+```
+
 
 
 
